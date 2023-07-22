@@ -25,10 +25,53 @@ import sys
 from scipy.optimize import curve_fit
 from scipy.optimize import fmin
 import scipy.optimize as optimize
+import scipy.constants as const
 import sklearn.metrics as metrics
 
+# Analyzing large TX to small RX transfer
+# [1] https://ieeexplore.ieee.org/document/9797856
+class asym_cmt_analysis:
+    def __init__(self):
+        self.freq = None
+        self.mag_energy = None # Eq. (9) alpha in [1]
+        self.flux_capture = None # Eq. (10) beta in [1]
+        self.H_amp = None
+        self.rx_angle = None
+        self.rx_area = None
+        self.rx_ind = None
+        self.tx_q = None
+        self.rx_q = None
+    
+    def cmt_gmax(self, freq, mag_energy, mag_amp, rx_angle, rx_area, rx_ind, tx_q, rx_q):
+        self.freq = freq
+        self.mag_energy = mag_energy
+        self.mag_amp = mag_amp
+        self.rx_angle = rx_angle
+        self.rx_area = rx_area
+        self.rx_ind = rx_ind
 
-class wpt_eval:
+        self.tx_q = tx_q
+        self.rx_q = rx_q
+
+        return self.gmax()
+    
+    def _alpha(self):
+        return self.mag_energy
+
+    def _beta(self):
+        return const.mu_0 * self.mag_amp * self.rx_area * math.cos(self.rx_angle)
+        
+    def coupling_rate(self):
+        alpha = self._alpha()
+        beta = self._beta()
+        return 1/(2*math.sqrt(2)) * 2 * const.pi * self.freq * beta / (math.sqrt(self.rx_ind * alpha))
+    
+    def gmax(self):
+        kappa = self.coupling_rate()
+        x = 4 * self.tx_q * self.rx_q * abs(kappa) ** 2 / (2 * const.pi * self.freq) ** 2
+        return (x / (1 + math.sqrt(1 + x)) ** 2)
+
+class network_analysis:
     def __init__(self):
         self.nw = None
         self.f_narrow_index_start = None
