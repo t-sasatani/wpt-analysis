@@ -31,6 +31,7 @@ import sklearn.metrics as metrics
 class wpt_eval:
     def __init__(self):
         self.nw = None
+        self.nw_orig = None
         self.f_narrow_index_start = None
         self.f_narrow_index_stop = None
         self.target_f_index = None
@@ -48,6 +49,8 @@ class wpt_eval:
 
         
         self.nw = rf.Network(filename)
+        self.nw_orig = self.nw
+
         self.sweeppoint = np.size(self.nw.frequency.f)
         print(filename)
 
@@ -119,6 +122,7 @@ class wpt_eval:
 
         # create network object with frequency converted to GHz units
         self.nw = rf.Network(name='nw_from_numpy', s=s, frequency=f_obj, z0=z0)
+        self.nw_orig = self.nw
         print(self)
 
         picoVNACOMObj.CloseVNA()
@@ -415,6 +419,7 @@ class wpt_eval:
         
 
         if c_network == 'CpCsRl':
+            print("Parameter order: [Cp, Cs]")
             def Z(params):
                 cp, cs = params
                 return 1/((1j * max_w_plot * cp) + 1/((1/(1j*max_w_plot*cs)+rload))) + 1j*max_w_plot*lrx
@@ -422,6 +427,41 @@ class wpt_eval:
                 return np.linalg.norm([Z(params).real-max_r_opt, Z(params).imag])
         sol = fmin(Zerror, np.array([100e-12,100e-12]),xtol=1e-9, ftol=1e-9)
         print(sol)
+
+    def reset_network(self):
+        self.nw = self.nw_orig
+
+    def append_network(self, cascade_port = 2, component = 'C', topology = 'parallel', value = None, ESR = 0):
+        for freq_index in range(size(self.nw.frequency.f)):
+            target_w = 2*np.pi*self.nw.frequency.f[freq_index]
+
+            #set component
+            if component == 'C':
+                tool_z = 1/(1j*target_w*value)
+            elif component == 'L':
+                tool_z = 1j*target_w*value
+            else:
+                print("error: component needs to be C or L")
+
+            #set topology
+            if topology == 'parallel':
+                tool_network = np.array(([1, 0], [1/tool_z, 1]), dtype='complex')
+            elif topology == 'series':
+                tool_network = np.array(([1, tool_z], [0, 1]), dtype='complex')
+            else:
+                print("error: topology needs to be parallel or series")
+
+            #format to network shape
+            if freq_index == 0:
+                abcd = tool_network
+            else:
+                abcd = np.dstack([abcd, tool_network])
+
+        # re-shape into (Nx2x2)
+        abcd = np.swapaxes(abcd, 0, 2)
+        
+        # create network object with frequency converted to GHz units
+        self.nw = rf.cascade(self.nw, rf.Network(a = abcd, frequency=self.nw.frequency))
 
     def optimal_load_plot(self, min_rez, min_imz, max_rez, max_imz, step_rez, step_imz, input_voltage, rx_port=2):
     # Optimal load visualization
@@ -460,7 +500,7 @@ class wpt_eval:
         fig, axs = plt.subplots(1, 3, figsize=(18, 5))
 
         c = axs[0].pcolor(imz_list, rez_list, eff_grid,
-                          cmap='hot', vmin=0, vmax=1, shading='auto')
+                          cmap='hot', vmin=0, vmax=eff_grid.max(), shading='auto')
         fig.colorbar(c, ax=axs[0])
         axs[0].set_title(
             'Efficiency @ '+format(self.nw.frequency.f[self.target_f_index], '3.2e')+' Hz')
@@ -476,7 +516,7 @@ class wpt_eval:
         axs[1].set_xlabel('Im($Z_{\mathrm{load}}$)')
 
         c = axs[2].pcolor(imz_list, rez_list, Pout, cmap='hot',
-                          vmin=0, vmax=Pin.max(), shading='auto')
+                          vmin=0, vmax=Pout.max(), shading='auto')
         fig.colorbar(c, ax=axs[2])
         axs[2].set_title('Output Power (W) @ ' +
                          format(self.nw.frequency.f[self.target_f_index], '3.2e')+' Hz')
